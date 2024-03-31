@@ -22,10 +22,14 @@ export default class App {
     scene: THREE.Scene;
     time: number;
 
+    // Env
+    envMap?: THREE.Texture;
+
     // Model
     dracoLoader: DRACOLoader;
     gltfLoader: GLTFLoader;
-    model?: THREE.Object3D<THREE.Object3DEventMap>;
+    model?: THREE.Mesh;
+    pmremGenerator?: THREE.PMREMGenerator;
 
     constructor() {
         // Create renderer.
@@ -62,9 +66,10 @@ export default class App {
         this.handleResize();
         window.addEventListener("resize", () => this.handleResize(), false);
 
+        this.addObjects();
+
         // Begin render loop.
         this.animate();
-        this.addObjects();
     }
 
     handleResize() {
@@ -84,31 +89,64 @@ export default class App {
     addLights() {
         const ambient = new THREE.AmbientLight(0xffffff, 0.5);
         this.scene.add(ambient);
-
         const directional = new THREE.DirectionalLight(0xffffff, 0.5);
         directional.position.set(0.5, 0, 0.866);
         this.scene.add(directional)
     }
 
     addObjects() {
+        // Load environment map.
+        this.pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+        this.pmremGenerator.compileEquirectangularShader();
+
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+            "environment-map.jpg",
+            texture => {
+                console.log("Done loading env map");
+                this.envMap = this.pmremGenerator?.fromEquirectangular(texture).texture;
+            },
+            ({ loaded, total }) => {
+                console.log(`Model ${loaded / total * 100}% loaded`)
+            },
+            error => {
+                console.log("Error loading environment map:", error);
+            }
+        )
+
+        // Load model.
         this.gltfLoader.load(
-            // Resource URL
+            // Resource URL.
             "human.glb",
-            (gltf) => {
-                console.log("loaded", gltf)
+            // On load complete.
+            gltf => {
+                console.log("Done loading model");
+
+                const model = gltf.scene.children[0];
+                if (!isMeshType(model) || !model.isMesh) {
+                    return
+                }
+
+                // Add model to scene.
                 this.scene.add(gltf.scene);
-                this.model = gltf.scene.children[0];
+                this.model = model;
                 this.model.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
                 this.model.rotation.set(0, 0, 0);
+                this.model.geometry.center();
 
-                if (isMeshType(this.model) && this.model.isMesh) {
-                    this.model.geometry.center();
+                const material = new THREE.MeshStandardMaterial({
+                    metalness: 1,
+                    roughness: 0.28
+                });
+                if (this.envMap) {
+                    material.envMap = this.envMap;
                 }
+                this.model.material = material;
             },
-            (xhr) => {
-                console.log((xhr.loaded / xhr.total * 100) + '% loaded')
+            ({ loaded, total }) => {
+                console.log(`Model ${loaded / total * 100}% loaded`)
             },
-            (error) => {
+            error => {
                 console.log("Error:", error)
             }
         )
